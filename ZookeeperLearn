@@ -1,0 +1,5 @@
+A name is a sequence of path elements separated by a slash (/). Every node in ZooKeeper's namespace is identified by a path
+名称是由斜杠(/)分隔的路径元素序列。ZooKeeper名称空间中的每个节点都由一个路径标识
+
+ZooKeeper also has the notion of ephemeral nodes. These znodes exists as long as the session that created the znode is active. 
+When the session ends the znode is deleted
