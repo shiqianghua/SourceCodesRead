@@ -3,3 +3,44 @@ A name is a sequence of path elements separated by a slash (/). Every node in Zo
 
 ZooKeeper also has the notion of ephemeral nodes. These znodes exists as long as the session that created the znode is active. 
 When the session ends the znode is deleted
+
+•	Sequential Consistency - Updates from a client will be applied in the order that they were sent.
+•	Atomicity - Updates either succeed or fail. No partial results.
+•	Single System Image - A client will see the same view of the service regardless of the server that it connects to. i.e., a client will never see an older view of the system even if the client fails over to a different server with the same session.
+•	Reliability - Once an update has been applied, it will persist from that time forward until a client overwrites the update.
+•	Timeliness - The clients view of the system is guaranteed to be up-to-date within a certain time bound.
+•顺序一致性——来自客户端的更新将按照发送的顺序进行。
+原子性——更新成功或失败。没有部分结果。
+•单个系统映像——无论连接到哪个服务器，客户机都将看到相同的服务视图。即。，即使客户机故障转移到具有相同会话的不同服务器，客户机也永远不会看到系统的旧视图。
+•可靠性——一旦应用了更新，它将一直持续，直到客户端覆盖更新。
+及时性-客户对系统的看法是保证在一定的时间范围内是最新的。
+
+With the exception of the request processor, each of the servers that make up the ZooKeeper service replicates its own copy of each of the components.
+除了请求处理器之外，构成ZooKeeper服务的每个服务器都复制每个组件的自己的副本。
+
+As part of the agreement protocol all write requests from clients are forwarded to a single server, called the leader. The rest of the ZooKeeper servers, called followers, receive message proposals from the leader and agree upon message delivery. The messaging layer takes care of replacing leaders on failures and syncing followers with leaders
+作为协议的一部分，所有来自客户端的写请求都被转发到一个名为leader的服务器上。Zookerper服务器的其余部分(称为追随者)接收来自领导者的消息建议，并就消息传递达成一致。消息层负责在出现故障时替换领导者，并将追随者与领导者同步
+ZooKeeper uses a custom atomic messaging protocol. Since the messaging layer is atomic, ZooKeeper can guarantee that the local replicas never diverge. When the leader receives a write request, it calculates what the state of the system is when the write is to be applied and transforms this into a transaction that captures this new state
+ZooKeeper使用自定义原子消息传递协议。因为消息层是原子的，所以ZooKeeper可以保证本地副本不会发散。当leader收到一个写请求时，它会计算将要应用的写时系统的状态，并将其转换为捕获这个新状态的事务
+
+Benchmarks also indicate that it is reliable, too. Reliability in the Presence of Errors shows how a deployment responds to various failures. The events marked in the figure are the following:
+
+Failure and recovery of a follower
+Failure and recovery of a different follower
+Failure of the leader
+Failure and recovery of two followers
+Failure of another leader
+基准测试也表明它是可靠的。错误存在时的可靠性显示了部署如何响应各种故障。图中标注的事件如下:
+跟随者的失败和恢复
+失败和恢复的追随者不同
+领导者的失败
+两个追随者的失败和恢复
+另一位领导者的失败
+
+To show the behavior of the system over time as failures are injected we ran a ZooKeeper service made up of 7 machines
+为了显示系统在注入故障时的随时间变化的行为，我们运行了一个由7台机器组成的ZooKeeper服务
+There are a few important observations from this graph. First, if followers fail and recover quickly, 
+then ZooKeeper is able to sustain a high throughput despite the failure. But maybe more importantly, 
+the leader election algorithm allows for the system to recover fast enough to prevent throughput from dropping substantially.
+In our observations, ZooKeeper takes less than 200ms to elect a new leader. Third, as followers recover, 
+ZooKeeper is able to raise throughput again once they start processing requests
