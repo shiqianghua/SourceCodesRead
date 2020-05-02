@@ -44,3 +44,57 @@ then ZooKeeper is able to sustain a high throughput despite the failure. But may
 the leader election algorithm allows for the system to recover fast enough to prevent throughput from dropping substantially.
 In our observations, ZooKeeper takes less than 200ms to elect a new leader. Third, as followers recover, 
 ZooKeeper is able to raise throughput again once they start processing requests
+
+tickTime : the basic time unit in milliseconds used by ZooKeeper. It is used to do heartbeats and the minimum session timeout will be twice the tickTime
+使用的以毫秒为单位的基本时间单位。它是用来做心跳和最小的会话超时将是滴答时间的两倍
+
+For replicated mode, a minimum of three servers are required, and it is strongly recommended that you have an odd number of servers. 
+If you only have two servers, then you are in a situation where if one of them fails, there are not enough machines to form a majority quorum. 
+Two servers are inherently less stable than a single server, because there are two single points of failure.
+
+initLimit和syncLimit区别：
+The new entry, initLimit is timeouts ZooKeeper uses to limit the length of time the ZooKeeper servers in quorum have to connect to a leader. 
+The entry syncLimit limits how far out of date a server can be from a leader.
+
+With both of these timeouts, you specify the unit of time using tickTime. In this example, 
+the timeout for initLimit is 5 ticks at 2000 milliseconds a tick, or 10 seconds.
+
+The entries of the form server.X list the servers that make up the ZooKeeper service. When the server starts up, 
+it knows which server it is by looking for the file myid in the data directory. That file has the contains the server number, 
+in ASCII.
+新的条目initLimit是ZooKeeper用来限制quorum里的ZooKeeper服务器必须连接到leader的超时时间。条目syncLimit限制了服务器与领导者之间的过时程度。
+对于这两个超时，您可以使用tickTime指定时间单位。在本例中，initLimit的超时时间为5个节拍，每个节拍为2000毫秒，即10秒。
+表单服务器的条目。列出构成ZooKeeper服务的服务器。当服务器启动时，它通过在数据目录中查找文件myid来知道它是哪个服务器。该文件包含服务器号，用ASCII表示。
+
+Please be aware that setting up multiple servers on a single machine will not create any redundancy.
+If something were to happen which caused the machine to die, all of the zookeeper servers would be offline. 
+Full redundancy requires that each server have its own machine. It must be a completely separate physical server. 
+Multiple virtual machines on the same physical host are still vulnerable to the complete failure of that host.
+请注意，在一台机器上设置多个服务器不会产生任何冗余。如果发生了导致机器死亡的事情，所有的zookeeper服务器都将离线。完全冗余要求每个服务器都有自己的机器。
+它必须是一个完全独立的物理服务器。同一物理主机上的多个虚拟机仍然容易受到该主机完全故障的影响。
+
+Paths to nodes are always expressed as canonical, absolute, slash-separated paths; there are no relative reference.
+Any unicode character can be used in a path subject to the following constraints
+节点的路径总是表示为规范的、绝对的、斜杠分隔的路径;没有相对的参考。任何unicode字符都可以在受以下约束的路径中使用
+
+
+note:
+In distributed application engineering, the word node can refer to a generic host machine, a server, a member of an ensemble, a client process, etc.
+In the ZooKeeper documentation, znodes refer to the data nodes. Servers refers to machines that make up the ZooKeeper service; 
+quorum peers refer to the servers that make up an ensemble; client refers to any host or process which uses a ZooKeeper service
+在分布式应用工程中，“节点”一词可以指一般的主机、服务器、集成的成员、客户端进程等。在ZooKeeper文档中，znodes指的是数据节点。
+服务器指的是构成ZooKeeper服务的机器;quorum peer是指组成合集的服务器;
+客户端是指任何使用ZooKeeper服务的主机或进程
+
+Because of this behavior ephemeral znodes are not allowed to have children
+When creating a znode you can also request that ZooKeeper append a monotonically increasing counter to the end of path. 
+This counter is unique to the parent znode
+
+The current implementation requires that the timeout be a minimum of 2 times the tickTime (as set in the server configuration)
+and a maximum of 20 times the tickTime
+当前实现要求超时最小为tickTime的2倍(在服务器配置中设置)，最大为tickTime的20倍
+
+In particular we have heuristics built into the client library to handle things like "herd effect", etc... 
+Only create a new session when you are notified of session expiration (mandatory)
+特别是，我们在客户端库中构建了启发式机制来处理诸如“羊群效应”等问题。只有在会话过期通知时才创建新会话(强制)
+
