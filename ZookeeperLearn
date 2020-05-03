@@ -560,3 +560,18 @@ public class DataMonitor implements Watcher, StatCallback {
     }
 }
 ```
+Both classes extend SyncPrimitive. In this way, we execute steps that are common to all primitives in the constructor of SyncPrimitive
+这两个类都扩展了SyncPrimitive。通过这种方式，我们可以执行SyncPrimitive构造函数中所有原语共有的步骤
+
+We use the process() method to process notifications triggered due to watches. 
+In the following discussion, we present code that sets watches. A watch is internal structure that enables ZooKeeper to notify a client of a change to a node. 
+For example, if a client is waiting for other clients to leave a barrier, then it can set a watch and wait for modifications to a particular node, which can indicate that it is the the end of the wait
+我们使用process()方法来处理由于监视而触发的通知。在接下来的讨论中，我们将介绍设置手表的代码。监视是一种内部结构，它使ZooKeeper能够将节点的更改通知客户端。例如，如果一个客户端正在等待其他客户端离开屏障，
+那么它可以设置一个监视并等待对某个特定节点的修改，这可能表明等待已经结束。一旦我们看了这些例子，这一点就清楚了
+
+A barrier is a primitive that enables a group of processes to synchronize the beginning and the end of a computation. 
+The general idea of this implementation is to have a barrier node that serves the purpose of being a parent for individual process nodes. 
+Suppose that we call the barrier node "/b1". Each process "p" then creates a node "/b1/p". 
+Once enough processes have created their corresponding nodes, joined processes can start the computation
+barrier是一个原语，它使一组进程能够同步计算的开始和结束。该实现的总体思想是使用barrier节点，它的作用是充当各个流程节点的父节点。
+假设我们称势垒节点为“/b1”。每个进程“p”然后创建一个节点“/b1/p”。一旦足够多的进程创建了相应的节点，连接的进程就可以开始计算
