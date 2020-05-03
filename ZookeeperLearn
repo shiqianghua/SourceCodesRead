@@ -236,3 +236,327 @@ This is usually done as soon as the client connects to a server and consists of 
 
 Its two constructors differ only by an optional session id and password. ZooKeeper supports session recovery across instances of a process
 它的两个构造函数只有可选的会话id和密码不同。ZooKeeper支持跨进程实例的会话恢复
+
+All completions for asynchronous calls and watcher callbacks will be made in order, one at a time. 
+The caller can do any processing they wish, but no other callbacks will be processed during that time
+异步调用和监视程序回调的所有完成将依次进行，一次完成一个。调用者可以做任何他们想做的处理，但是在此期间不会处理任何其他回调
+
+
+Note that if there is a change to /a between the asynchronous read and the synchronous read, 
+the client library will receive the watch event saying /a changed before the response for the synchronous read,
+but because of the completion callback blocking the event queue, the synchronous read will return with the new value of /a before the watch event is processed
+
+注意,如果有更改/异步读取和同步阅读,客户端库将收到之前的观察事件说/改变响应的同步阅读,但由于完成回调阻塞事件队列,同步阅读的新值将返回/前观察事件处理
+
+The list of ZooKeeper servers used by the client must match the list of ZooKeeper servers that each ZooKeeper server has. 
+Things can work, although not optimally, if the client list is a subset of the real list of ZooKeeper servers, 
+but not if the client lists ZooKeeper servers not in the ZooKeeper cluster
+客户端使用的ZooKeeper服务器列表必须与每个ZooKeeper服务器拥有的ZooKeeper服务器列表匹配。如果客户端列表是ZooKeeper服务器的实际列表的一个子集，那么一切都可以正常运行，但如果客户端列出了不在ZooKeeper集群中的ZooKeeper服务器，情况就不一样了
+
+Be careful where you put that transaction log. The most performance-critical part of ZooKeeper is the transaction log. 
+ZooKeeper must sync transactions to media before it returns a response.
+A dedicated transaction log device is key to consistent good performance.
+Putting the log on a busy device will adversely effect performance.
+If you only have one storage device, put trace files on NFS and increase the snapshotCount; 
+it doesn't eliminate the problem, but it can mitigate it
+小心你把事务日志放在什么地方。ZooKeeper中对性能最关键的部分是事务日志。在返回响应之前，ZooKeeper必须将事务同步到媒体。
+专用事务日志设备是保持良好性能的关键。将日志放在繁忙的设备上会对性能产生负面影响。
+如果您只有一个存储设备，那么将跟踪文件放在NFS上，并增加snapshotCount;它不能消除问题，但可以减轻问题
+
+Conventionally, ZooKeeper applications are broken into two units, one which maintains the connection, and the other which monitors data.
+通常，ZooKeeper应用程序分为两个单元，一个负责维护连接，另一个负责监控数据
+Recall that the Executor's job is to start and stop the executable whose name you pass in on the command line. 
+It does this in response to events fired by the ZooKeeper object. As you can see in the code above, the Executor passes a reference to itself as the Watcher argument in the ZooKeeper constructor. It also passes a reference to itself as DataMonitorListener argument to the DataMonitor constructor. 
+Per the Executor's definition, it implements both these interfaces
+回想一下，执行者的工作是启动和停止在命令行中传递其名称的可执行文件。它这样做是为了响应ZooKeeper对象触发的事件。
+正如您在上面的代码中所看到的，执行器在ZooKeeper构造函数中将引用作为观察者参数传递给自身。
+它还将引用作为DataMonitorListener参数传递给DataMonitor构造函数。
+根据执行者的定义，它实现这两个接口
+
+The Watcher interface is defined by the ZooKeeper Java API. 
+ZooKeeper uses it to communicate back to its container. It supports only one method, process(), 
+and ZooKeeper uses it to communicates generic events that the main thread would be interested in, 
+such as the state of the ZooKeeper connection or the ZooKeeper session. 
+The Executor in this example simply forwards those events down to the DataMonitor to decide what to do with them. 
+It does this simply to illustrate the point that, by convention, the Executor or some Executor-like object "owns" the ZooKeeper connection, 
+but it is free to delegate the events to other events to other objects. It also uses this as the default channel on which to fire watch events. (More on this later.)
+观察者接口是由ZooKeeper Java API定义的。ZooKeeper使用它与容器进行通信。它只支持一个方法，process()， 
+ZooKeeper使用它来传递主线程感兴趣的一般事件，比如ZooKeeper连接或ZooKeeper会话的状态。
+本例中的执行程序只是将这些事件转发给DataMonitor来决定如何处理它们。
+这样做只是为了说明，按照惯例，执行程序或某些类似于执行程序的对象“拥有”ZooKeeper连接，
+但是可以自由地将事件委托给其他事件，也可以委托给其他对象。它还将此作为触发监视事件的默认通道。(稍后会详细介绍。)
+
+Note, it doesn't have to do any Exception processing for the getData call because it has watches pending for anything that could cause an error: 
+if the node is deleted before it calls ZooKeeper.getData(), the watch event set by the ZooKeeper.exists() triggers a callback
+注意，它不必对getData调用执行任何异常处理，因为它有可能导致错误的监视:如果节点在调用ZooKeeper.getData()之前被删除，则由ZooKeeper.exists()设置的监视事件将触发回调
+
+Executor.java
+/**
+ * A simple example program to use DataMonitor to start and
+ * stop executables based on a znode. The program watches the
+ * specified znode and saves the data that corresponds to the
+ * znode in the filesystem. It also starts the specified program
+ * with the specified arguments when the znode exists and kills
+ * the program if the znode goes away.
+ */
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
+
+public class Executor
+    implements Watcher, Runnable, DataMonitor.DataMonitorListener
+{
+    String znode;
+    DataMonitor dm;
+    ZooKeeper zk;
+    String filename;
+    String exec[];
+    Process child;
+
+    public Executor(String hostPort, String znode, String filename,
+            String exec[]) throws KeeperException, IOException {
+        this.filename = filename;
+        this.exec = exec;
+        zk = new ZooKeeper(hostPort, 3000, this);
+        dm = new DataMonitor(zk, znode, null, this);
+    }
+
+    /**
+     * @param args
+     */
+    public static void main(String[] args) {
+        if (args.length < 4) {
+            System.err
+                    .println("USAGE: Executor hostPort znode filename program [args ...]");
+            System.exit(2);
+        }
+        String hostPort = args[0];
+        String znode = args[1];
+        String filename = args[2];
+        String exec[] = new String[args.length - 3];
+        System.arraycopy(args, 3, exec, 0, exec.length);
+        try {
+            new Executor(hostPort, znode, filename, exec).run();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /***************************************************************************
+     * We do process any events ourselves, we just need to forward them on.
+     *
+     * @see org.apache.zookeeper.Watcher#process(org.apache.zookeeper.proto.WatcherEvent)
+     */
+    public void process(WatchedEvent event) {
+        dm.process(event);
+    }
+
+    public void run() {
+        try {
+            synchronized (this) {
+                while (!dm.dead) {
+                    wait();
+                }
+            }
+        } catch (InterruptedException e) {
+        }
+    }
+
+    public void closing(int rc) {
+        synchronized (this) {
+            notifyAll();
+        }
+    }
+
+    static class StreamWriter extends Thread {
+        OutputStream os;
+
+        InputStream is;
+
+        StreamWriter(InputStream is, OutputStream os) {
+            this.is = is;
+            this.os = os;
+            start();
+        }
+
+        public void run() {
+            byte b[] = new byte[80];
+            int rc;
+            try {
+                while ((rc = is.read(b)) > 0) {
+                    os.write(b, 0, rc);
+                }
+            } catch (IOException e) {
+            }
+
+        }
+    }
+
+    public void exists(byte[] data) {
+        if (data == null) {
+            if (child != null) {
+                System.out.println("Killing process");
+                child.destroy();
+                try {
+                    child.waitFor();
+                } catch (InterruptedException e) {
+                }
+            }
+            child = null;
+        } else {
+            if (child != null) {
+                System.out.println("Stopping child");
+                child.destroy();
+                try {
+                    child.waitFor();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            try {
+                FileOutputStream fos = new FileOutputStream(filename);
+                fos.write(data);
+                fos.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            try {
+                System.out.println("Starting child");
+                child = Runtime.getRuntime().exec(exec);
+                new StreamWriter(child.getInputStream(), System.out);
+                new StreamWriter(child.getErrorStream(), System.err);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+DataMonitor.java
+/**
+ * A simple class that monitors the data and existence of a ZooKeeper
+ * node. It uses asynchronous ZooKeeper APIs.
+ */
+import java.util.Arrays;
+
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.AsyncCallback.StatCallback;
+import org.apache.zookeeper.KeeperException.Code;
+import org.apache.zookeeper.data.Stat;
+
+public class DataMonitor implements Watcher, StatCallback {
+
+    ZooKeeper zk;
+    String znode;
+    Watcher chainedWatcher;
+    boolean dead;
+    DataMonitorListener listener;
+    byte prevData[];
+
+    public DataMonitor(ZooKeeper zk, String znode, Watcher chainedWatcher,
+            DataMonitorListener listener) {
+        this.zk = zk;
+        this.znode = znode;
+        this.chainedWatcher = chainedWatcher;
+        this.listener = listener;
+        // Get things started by checking if the node exists. We are going
+        // to be completely event driven
+        zk.exists(znode, true, this, null);
+    }
+
+    /**
+     * Other classes use the DataMonitor by implementing this method
+     */
+    public interface DataMonitorListener {
+        /**
+         * The existence status of the node has changed.
+         */
+        void exists(byte data[]);
+
+        /**
+         * The ZooKeeper session is no longer valid.
+         *
+         * @param rc
+         *                the ZooKeeper reason code
+         */
+        void closing(int rc);
+    }
+
+    public void process(WatchedEvent event) {
+        String path = event.getPath();
+        if (event.getType() == Event.EventType.None) {
+            // We are are being told that the state of the
+            // connection has changed
+            switch (event.getState()) {
+            case SyncConnected:
+                // In this particular example we don't need to do anything
+                // here - watches are automatically re-registered with
+                // server and any watches triggered while the client was
+                // disconnected will be delivered (in order of course)
+                break;
+            case Expired:
+                // It's all over
+                dead = true;
+                listener.closing(KeeperException.Code.SessionExpired);
+                break;
+            }
+        } else {
+            if (path != null && path.equals(znode)) {
+                // Something has changed on the node, let's find out
+                zk.exists(znode, true, this, null);
+            }
+        }
+        if (chainedWatcher != null) {
+            chainedWatcher.process(event);
+        }
+    }
+
+    public void processResult(int rc, String path, Object ctx, Stat stat) {
+        boolean exists;
+        switch (rc) {
+        case Code.Ok:
+            exists = true;
+            break;
+        case Code.NoNode:
+            exists = false;
+            break;
+        case Code.SessionExpired:
+        case Code.NoAuth:
+            dead = true;
+            listener.closing(rc);
+            return;
+        default:
+            // Retry errors
+            zk.exists(znode, true, this, null);
+            return;
+        }
+
+        byte b[] = null;
+        if (exists) {
+            try {
+                b = zk.getData(znode, false, null);
+            } catch (KeeperException e) {
+                // We don't need to worry about recovering now. The watch
+                // callbacks will kick off any exception handling
+                e.printStackTrace();
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+        if ((b == null && b != prevData)
+                || (b != null && !Arrays.equals(prevData, b))) {
+            listener.exists(b);
+            prevData = b;
+        }
+    }
+}
+```
