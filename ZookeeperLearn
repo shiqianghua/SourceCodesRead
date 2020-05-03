@@ -98,3 +98,141 @@ In particular we have heuristics built into the client library to handle things 
 Only create a new session when you are notified of session expiration (mandatory)
 特别是，我们在客户端库中构建了启发式机制来处理诸如“羊群效应”等问题。只有在会话过期通知时才创建新会话(强制)
 
+Another parameter to the ZooKeeper session establishment call is the default watcher. 
+Watchers are notified when any state change occurs in the client. For example if the client loses connectivity to the server the client will be notified, or if the client's session expires, etc... This watcher should consider the initial state to be disconnected (i.e. before any state changes events are sent to the watcher by the client lib).
+In the case of a new connection, the first event sent to the watcher is typically the session connection event
+ZooKeeper会话建立调用的另一个参数是默认的监视程序。当客户端发生任何状态变化时，观察者都会收到通知。
+例如，如果客户端失去与服务器的连接，客户端将得到通知，或者如果客户端会话过期，等等。
+此监视程序应该考虑断开初始状态(即在任何状态更改事件由客户端库发送到监视程序之前)。
+在新连接的情况下，发送给观察者的第一个事件通常是会话连接事件
+
+The timing of the PING is conservative enough to ensure reasonable time to detect a dead connection and reconnect to a new server
+PING的时间足够保守，可以确保有足够的时间检测死连接并重新连接到新服务器
+The application calls an operation on a session that is no longer alive/valid
+应用程序调用一个不再有效的会话上的操作
+
+Added in 3.2.0 -- SessionMovedException. There is an internal exception that is generally not seen by clients called the SessionMovedException.
+This exception occurs because a request was received on a connection for a session which has been reestablished on a different server. 
+The normal cause of this error is a client that sends a request to a server, but the network packet gets delayed, so the client times out and connects to a new server.
+When the delayed packet arrives at the first server, the old server detects that the session has moved, and closes the client connection. 
+Clients normally do not see this error since they do not read from those old connections. (Old connections are usually closed.) One situation in which this condition can be seen is when two clients try to reestablish the same connection using a saved session id and password. One of the clients will reestablish the connection and the second client will be disconnected (causing the pair to attempt to re-establish its connection/session indefinitely)
+有一个内部异常通常不会被客户端看到，它叫做SessionMovedException。发生此异常是因为在连接上接收了已在不同服务器上重新建立的会话的请求。
+这个错误的正常原因是客户机向服务器发送了一个请求，但是网络包被延迟了，所以客户机超时并连接到一个新服务器。
+当延迟的包到达第一个服务器时，旧服务器检测到会话已经移动，并关闭客户端连接。客户端通常不会看到这个错误，因为他们不会从那些旧的连接中读取数据。
+(旧的连接通常是关闭的。)可以看到这种情况的一种情况是，两个客户机试图使用保存的会话id和密码重新建立相同的连接。
+其中一个客户端将重新建立连接，而第二个客户端将被断开连接(导致这对客户端试图无限期地重新建立其连接/会话)。
+
+The function invokes a probabilistic load-balancing algorithm which may cause the client to disconnect from its current host with the goal to achieve expected uniform number of connections per server in the new list
+该函数调用一个概率负载平衡算法，该算法可能导致客户端从当前主机断开连接，目的是在新列表中实现每个服务器的预期统一连接数
+In case the current host to which the client is connected is not in the new list this call will always cause the connection to be dropped. Otherwise,
+the decision is based on whether the number of servers has increased or decreased and by how much.
+如果客户端所连接的当前主机不在新列表中，则此调用将始终导致连接被删除。否则，决策将基于服务器的数量是增加了还是减少了，以及增加了多少。
+For example, if the previous connection string contained 3 hosts and now the list contains these 3 hosts and 2 more hosts, 40% of clients connected to each of the 3 hosts will move to one of the new hosts in order to balance the load.
+The algorithm will cause the client to drop its connection to the current host to which it is connected with probability 0.4 and in this case cause the client to connect to one of the 2 new hosts, chosen at random
+例如，如果以前的连接字符串包含3台主机，而现在列表包含这3台主机和另外2台主机，那么连接到这3台主机的客户端中有40%将移动到其中一台新主机，以平衡负载。该算法将导致客户端放弃其与当前主机的连接(概率为0.4)，在这种情况下，将导致客户端连接到随机选择的两个新主机中的一个
+ each client decides to disconnect with probability 0.4 but once the decision is made, it will try to connect to a random new server and only if it cannot connect to any of the new servers will it try to connect to the old ones
+每个客户决定断开与概率0.4，但一旦决定
+
+What's the reason for having the config option to disable local session upgrade?
+In a large deployment which wants to handle a very large number of clients, we know that clients connecting via the observers which is supposed to be local session only. 
+So this is more like a safeguard against someone accidentally creates lots of ephemeral nodes and global sessions
+使用配置选项来禁用本地会话升级的原因是什么?
+在一个需要处理大量客户机的大型部署中，我们知道客户机通过观察者连接，而观察者应该只是本地会话。
+因此，这更像是一种防范意外创建大量临时节点和全局会话的安全措施
+
+
+What happens if the create for session is sent at server A and the client disconnects to some other server B which ends up sending it again and then disconnects and connects back to server A?
+
+When a client reconnects to B, its sessionId won’t exist in B’s local session tracker. So B will send validation packet. 
+If CreateSession issued by A is committed before validation packet arrive the client will be able to connect. 
+Otherwise, the client will get session expired because the quorum hasn’t know about this session yet. 
+If the client also tries to connect back to A again, the session is already removed from local session tracker.
+So A will need to send a validation packet to the leader. The outcome should be the same as B depending on the timing of the request
+我们知道客户端通过观察员连接，这应该是本地会话
+
+如果create for session是在服务器A上发送的，客户端断开与其他服务器B的连接，服务器B再次发送它，然后断开连接，重新连接到服务器A，会发生什么情况?
+
+当客户端重新连接到B时，它的sessionId在B的本地会话跟踪器中不存在。所以B会发送验证包。如果在验证包到达之前提交了由A发出的CreateSession，
+客户端将能够连接。否则，客户端将获得会话过期，因为quorum还不知道这个会话。如果客户端还试图再次连接回，则会话已从本地会话跟踪器中删除。
+所以A需要发送一个验证包给leader。根据请求的时间，结果应该与B相同。
+Sent to the client This implies that an event is on the way to the client, 
+but may not reach the client before the successful return code to the change operation reaches the client that initiated the change. 
+Watches are sent asynchronously to watchers. ZooKeeper provides an ordering guarantee: a client will never see a change for which it has set a watch until it first sees the watch event.
+Network delays or other factors may cause different clients to see watches and return codes from updates at different times.
+The key point is that everything seen by the different clients will have a consistent order.
+发送到客户端这意味着一个事件正在发送到客户端途中，但是可能在成功返回到更改操作的代码到达发起更改的客户端之前无法到达客户端。
+手表以异步方式发送给观察者。ZooKeeper提供了一个顺序保证:在第一次看到watch事件之前，客户端永远不会看到已经为其设置了一个watch的更改。
+网络延迟或其他因素可能会导致不同的客户端看到手表，并在不同的时间从更新中返回代码。
+关键是不同客户看到的所有东西都有一个一致的顺序。
+
+The data for which the watch was set 。This refers to the different ways a node can change.
+It helps to think of ZooKeeper as maintaining two lists of watches: data watches and child watches. 
+getData() and exists() set data watches. getChildren() sets child watches. 
+Alternatively, it may help to think of watches being set according to the kind of data returned.
+getData() and exists() return information about the data of the node, whereas getChildren() returns a list of children.
+Thus, setData() will trigger data watches for the znode being set (assuming the set is successful). 
+A successful create() will trigger a data watch for the znode being created and a child watch for the parent znode.
+A successful delete() will trigger both a data watch and a child watch (since there can be no more children) for a znode being deleted as well as a child watch for the parent znode
+设置手表的数据。这指的是一个节点改变的不同方式。可以将ZooKeeper看作是维护两个表:数据表和子表。
+getData()和exists()设置数据手表。getChildren()设置子手表。或者，可以考虑根据返回的数据类型设置手表。
+getData()和exists()返回关于节点数据的信息，而getChildren()返回子节点的列表。
+因此，setData()将触发正在设置的znode的数据监视(假设设置成功)。成功的create()将触发正在创建的znode的数据监视，以及父znode的子监视。
+成功的delete()将同时触发删除znode的数据监视和监视(因为不能有更多的监视)，以及父znode的监视
+any previously registered watches will be reregistered and triggered if needed. In general this all occurs transparently.
+任何以前注册的手表将重新注册，并在需要时触发。一般来说，这一切都是透明的。
+
+New in 3.6.0: Clients can also set permanent, recursive watches on a znode that are not removed when triggered and that trigger for changes on the registered znode as well as any children znodes recursively
+3.6.0中的新特性:客户端还可以在znode上设置永久的递归监视，这些监视在被触发时不会被删除，并且会触发已注册的znode以及任何子znode上的递归更改
+
+New in 3.6.0: There is now a variation on the standard watch described above whereby you can set a watch that does not get removed when triggered. Additionally, these watches trigger the event types NodeCreated, NodeDeleted, and NodeDataChanged and, optionally, recursively for all znodes starting at the znode that the watch is registered for. Note that NodeChildrenChanged events are not triggered for persistent recursive watches as it would be redundant.
+
+Persistent watches are set using the method addWatch(). 
+The triggering semantics and guarantees (other than one-time triggering) are the same as standard watches. 
+The only exception regarding events is that recursive persistent watchers never trigger child changed events as they are redundant.
+Persistent watches are removed using removeWatches() with watcher type WatcherType.Any
+新的在3.6.0:现在有一个变化的标准手表描述上述，你可以设置一个手表不被删除时触发。此外，这些手表会触发nodecated、NodeDeleted和NodeDataChanged事件类型，
+并可选地递归地触发从手表注册的znode开始的所有znode。注意，NodeChildrenChanged事件不会被持久递归监视触发，因为它是冗余的。
+
+持久性监视是使用addWatch()方法设置的。触发语义和保证(除了一次性触发之外)与标准手表相同。关于事件的惟一例外是，
+递归持久观察者永远不会触发子更改事件，因为它们是冗余的。使用带有watcher类型WatcherType.Any的removeWatches()来删除持久手表。
+Watches are ordered with respect to other events, other watches, and asynchronous replies
+根据其他事件、其他手表和异步响应对监听进行排序
+A client will see a watch event for a znode it is watching before seeing the new data that corresponds to that znode.
+
+The order of watch events from ZooKeeper corresponds to the order of the updates as seen by the ZooKeeper service.
+在看到与该znode相对应的新数据之前，客户机将看到它正在监视的znode的监视事件。
+
+来自ZooKeeper的观看事件的顺序对应于由ZooKeeper服务看到的更新的顺序。
+For example, if the same watch object is registered for an exists and a getData call for the same file and that file is then deleted, 
+the watch object would only be invoked once with the deletion notification for the file
+例如，如果为exists和getData调用注册了相同的监视对象，然后删除了该文件，那么该监视对象只会被该文件的删除通知调用一次
+it employs permission bits to allow/disallow various operations against a node and the scope to which the bits apply
+它使用权限位来允许/不允许对一个节点进行各种操作，以及这些位所适用的范围
+
+The CREATE and DELETE permissions have been broken out of the WRITE permission for finer grained access controls
+创建和删除权限已经从更细粒度的访问控制的写权限中被打破
+
+Also, the ADMIN permission is there since ZooKeeper doesn’t have a notion of file owner. 
+In some sense the ADMIN permission designates the entity as the owner. 
+ZooKeeper doesn’t support the LOOKUP permission (execute permission bit on directories to allow you to LOOKUP even though you can't list the directory). 
+Everyone implicitly has LOOKUP permission. This allows you to stat a node, but nothing more. 
+(The problem is, if you want to call zoo_exists() on a node that doesn't exist, there is no permission to check.)
+此外，管理员权限是存在的，因为ZooKeeper没有文件所有者的概念。在某种意义上，管理权限指定实体为所有者。
+ZooKeeper不支持查找权限(在目录上执行权限位，即使不能列出目录也可以查找)。每个人都隐式地拥有查找权限。
+这允许您统计一个节点，但仅此而已。(问题是，如果您想在不存在的节点上调用zoo_exists()，则没有检查权限。)
+
+auth is a special scheme which ignores any provided expression and instead uses the current user, credentials, and scheme. 
+Any expression (whether user like with SASL authentication or user:password like with DIGEST authentication) provided is ignored by the ZooKeeper server when persisting the ACL. 
+However, the expression must still be provided in the ACL because the ACL must match the form scheme:expression:perms.
+This scheme is provided as a convenience as it is a common use-case for a user to create a znode and then restrict access to that znode to only that user. 
+If there is no authenticated user, setting an ACL with the auth scheme will fail
+auth是一种特殊的模式，它忽略任何提供的表达式，而是使用当前用户、凭据和模式。
+当持久化ACL时，ZooKeeper服务器将忽略提供的任何表达式(不管是用户喜欢SASL身份验证还是用户:密码喜欢摘要身份验证)。
+但是，表达式仍然必须在ACL中提供，因为ACL必须匹配表单scheme:expression:perms。提供此方案是为了方便，因为用户通常会创建一个znode，然后将对该znode的访问限制为只针对该用户。
+如果没有经过身份验证的用户，则使用auth模式设置ACL将失败
+
+This is usually done as soon as the client connects to a server and consists of validating information sent from or gathered about a client and associating it with the connection
+这通常是在客户端连接到服务器时完成的，包括验证从客户端发送或收集的关于客户端的信息，并将其与连接关联起来
+
+Its two constructors differ only by an optional session id and password. ZooKeeper supports session recovery across instances of a process
+它的两个构造函数只有可选的会话id和密码不同。ZooKeeper支持跨进程实例的会话恢复
